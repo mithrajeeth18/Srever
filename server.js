@@ -49,6 +49,10 @@ app.get("/api/logs", (req, res) => {
   res.json(logs);
 });
 
+app.use((req, res) => {
+  res.status(404).json({ message: "<h1>Welcome Fucker</h1>" });
+});
+
 app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
 });
