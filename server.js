@@ -5,7 +5,8 @@ const fs = require("fs");
 const cors = require("cors");
 
 const app = express();
-const PORT = 5001;
+const PORT = process.env.PORT || 5001;
+const BASE_URL = process.env.BASE_URL || `https://sstamp.onrender.com`; // Render base URL fallback
 
 app.use(cors());
 app.use(express.json());
@@ -31,7 +32,7 @@ app.post("/api/upload", upload.single("screenshot"), (req, res) => {
   const { timestamp } = req.body;
   const usage = JSON.parse(req.body.usage || "{}");
 
-  const fileUrl = `http://localhost:${PORT}/uploads/${req.file.filename}`;
+  const fileUrl = `${BASE_URL}/uploads/${req.file.filename}`;
 
   logs.unshift({
     imageUrl: fileUrl,
@@ -39,7 +40,6 @@ app.post("/api/upload", upload.single("screenshot"), (req, res) => {
     timestamp,
   });
 
-  // Keep only the last 20 logs
   if (logs.length > 20) logs.pop();
 
   res.status(200).json({ message: "Uploaded" });
@@ -49,10 +49,11 @@ app.get("/api/logs", (req, res) => {
   res.json(logs);
 });
 
+// Custom 404 Handler
 app.use((req, res) => {
-  res.status(404).json({ message: "<h1>Welcome Fucker</h1>" });
+  res.status(404).send("<h1>Welcome Fucker</h1>"); // Still edgy? 😏
 });
 
 app.listen(PORT, () => {
-  console.log(`Server running on http://localhost:${PORT}`);
+  console.log(`Server running on port ${PORT}`);
 });
