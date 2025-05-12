@@ -7,6 +7,7 @@ const cors = require("cors");
 const app = express();
 const PORT = process.env.PORT || 5001;
 const BASE_URL = process.env.BASE_URL || `https://sstamp.onrender.com`; // Render base URL fallback
+let currentInterval = 30;
 
 app.use(cors());
 app.use(express.json());
@@ -27,6 +28,13 @@ const storage = multer.diskStorage({
 const upload = multer({ storage });
 
 let logs = []; // Stores data like { imageUrl, usage, timestamp }
+app.post("/api/interval", (req, res) => {
+  const { interval } = req.body;
+  currentInterval = parseInt(interval);
+  fs.writeFileSync("interval.txt", currentInterval.toString());
+  res.status(200).json({ message: "Interval updated" });
+});
+
 
 app.post("/api/upload", upload.single("screenshot"), (req, res) => {
   const { timestamp } = req.body;
@@ -40,7 +48,18 @@ app.post("/api/upload", upload.single("screenshot"), (req, res) => {
     timestamp,
   });
 
-  if (logs.length > 20) logs.pop();
+  if (logs.length > 30){
+
+
+    const removed = logs.pop();
+
+    const filename = removed.imageUrl.split("/").pop();
+    const filePath = path.join(__dirname, "uploads", filename);
+
+    fs.unlink(filePath, (err) => {
+      if (err) console.error("Failed to delete old screenshot:", err);
+    });
+  }
 
   res.status(200).json({ message: "Uploaded" });
 });
