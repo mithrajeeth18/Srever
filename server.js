@@ -1,52 +1,59 @@
 const express = require("express");
 const multer = require("multer");
-const fs = require("fs");
 const path = require("path");
+const fs = require("fs");
+const cors = require("cors");
 
-const UPLOAD_DIR = path.join(__dirname, "uploads");
-const MAX_IMAGES = 30;
+const app = express();
+const PORT = process.env.PORT || 5001;
+const BASE_URL = process.env.BASE_URL || `https://sstamp.onrender.com`; // Render base URL fallback
+
+app.use(cors());
+app.use(express.json());
+app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
 const storage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    cb(null, UPLOAD_DIR);
+  destination: (req, file, cb) => {
+    const dir = "./uploads";
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir);
+    cb(null, dir);
   },
-  filename: function (req, file, cb) {
+  filename: (req, file, cb) => {
     const timestamp = Date.now();
-    const ext = path.extname(file.originalname);
-    cb(null, `screenshot_${timestamp}${ext}`);
+    cb(null, `screenshot_${timestamp}.png`);
   },
 });
 
 const upload = multer({ storage });
-const router = express.Router();
 
-router.post("/api/upload", upload.single("screenshot"), async (req, res) => {
-  try {
-    const usage = JSON.parse(req.body.usage || "{}");
-    const file = req.file;
+let logs = []; // Stores data like { imageUrl, usage, timestamp }
 
-    // Get all images sorted by creation time (oldest first)
-    const files = fs
-      .readdirSync(UPLOAD_DIR)
-      .map((file) => ({
-        name: file,
-        time: fs.statSync(path.join(UPLOAD_DIR, file)).birthtimeMs,
-      }))
-      .sort((a, b) => a.time - b.time);
+app.post("/api/upload", upload.single("screenshot"), (req, res) => {
+  const { timestamp } = req.body;
+  const usage = JSON.parse(req.body.usage || "{}");
 
-    // Delete oldest files if limit exceeded
-    if (files.length > MAX_IMAGES) {
-      const toDelete = files.slice(0, files.length - MAX_IMAGES);
-      toDelete.forEach((fileObj) => {
-        fs.unlinkSync(path.join(UPLOAD_DIR, fileObj.name));
-      });
-    }
+  const fileUrl = `${BASE_URL}/uploads/${req.file.filename}`;
 
-    return res.status(200).json({ message: "Upload success" });
-  } catch (err) {
-    console.error(err);
-    return res.status(500).json({ error: "Failed to upload" });
-  }
+  logs.unshift({
+    imageUrl: fileUrl,
+    usage,
+    timestamp,
+  });
+
+  if (logs.length > 20) logs.pop();
+
+  res.status(200).json({ message: "Uploaded" });
 });
 
-module.exports = router;
+app.get("/api/logs", (req, res) => {
+  res.json(logs);
+});
+
+// Custom 404 Handler
+app.use((req, res) => {
+  res.status(404).send("<h1>Welcome Fucker</h1>"); // Still edgy? 😏
+});
+
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
+});
