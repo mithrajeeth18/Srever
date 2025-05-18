@@ -10,7 +10,13 @@ const BASE_URL = process.env.BASE_URL || `https://sstamp.onrender.com`; // Rende
 let currentInterval = 30;
 
 app.use(cors());
-app.use(express.json());
+app.use(
+  express.json({
+    origin: "http://localhost:3005", // Replace with your frontend's origin
+    methods: ["GET"],
+    credentials: true,
+  })
+);
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
 const storage = multer.diskStorage({
@@ -48,7 +54,7 @@ app.post("/api/upload", upload.single("screenshot"), (req, res) => {
     timestamp,
   });
 
-  if (logs.length > 30){
+  if (logs.length > 100){
 
 
     const removed = logs.pop();
