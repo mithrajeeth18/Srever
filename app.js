@@ -3,16 +3,20 @@ const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
 const cors = require("cors");
+const crypto = require("crypto");
 
 const app = express();
 const PORT = process.env.PORT || 5001;
-const BASE_URL = process.env.BASE_URL || `https://sstamp.onrender.com`; // Render base URL fallback
+const BASE_URL = process.env.BASE_URL || `https://sstamp.onrender.com`;
 let currentInterval = 30;
+
+const SECRET_KEY = Buffer.from("12345678901234567890123456789012"); // 32 chars for AES-256
+// Note: keep this same in frontend for decryption
 
 app.use(cors());
 app.use(
   express.json({
-    origin: "http://localhost:3005", // Replace with your frontend's origin
+    origin: "http://localhost:3005",
     methods: ["GET"],
     credentials: true,
   })
@@ -34,13 +38,22 @@ const storage = multer.diskStorage({
 const upload = multer({ storage });
 
 let logs = []; // Stores data like { imageUrl, usage, timestamp }
+
+// 🔐 Encryption function
+function encryptData(data) {
+  const iv = crypto.randomBytes(16);
+  const cipher = crypto.createCipheriv("aes-256-cbc", SECRET_KEY, iv);
+  let encrypted = cipher.update(JSON.stringify(data));
+  encrypted = Buffer.concat([encrypted, cipher.final()]);
+  return { iv: iv.toString("hex"), data: encrypted.toString("hex") };
+}
+
 app.post("/api/interval", (req, res) => {
   const { interval } = req.body;
   currentInterval = parseInt(interval);
   fs.writeFileSync("interval.txt", currentInterval.toString());
   res.status(200).json({ message: "Interval updated" });
 });
-
 
 app.post("/api/upload", upload.single("screenshot"), (req, res) => {
   const { timestamp } = req.body;
@@ -54,14 +67,10 @@ app.post("/api/upload", upload.single("screenshot"), (req, res) => {
     timestamp,
   });
 
-  if (logs.length > 100){
-
-
+  if (logs.length > 100) {
     const removed = logs.pop();
-
     const filename = removed.imageUrl.split("/").pop();
     const filePath = path.join(__dirname, "uploads", filename);
-
     fs.unlink(filePath, (err) => {
       if (err) console.error("Failed to delete old screenshot:", err);
     });
@@ -70,13 +79,15 @@ app.post("/api/upload", upload.single("screenshot"), (req, res) => {
   res.status(200).json({ message: "Uploaded" });
 });
 
+// 🔐 Encrypted logs endpoint
 app.get("/api/logs", (req, res) => {
-  res.json(logs);
+  const encrypted = encryptData(logs);
+  res.json(encrypted);
 });
 
 // Custom 404 Handler
 app.use((req, res) => {
-  res.status(404).send("<h1>Welcome Fucker</h1>"); // Still edgy? 😏
+  res.status(404).send("<h1>Welcome Fucker</h1>");
 });
 
 app.listen(PORT, () => {
