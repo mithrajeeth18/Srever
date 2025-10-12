@@ -4,13 +4,14 @@ const path = require("path");
 const fs = require("fs");
 const cors = require("cors");
 const crypto = require("crypto");
+require("dotenv").config();
 
 const app = express();
 const PORT = process.env.PORT || 5001;
 const BASE_URL = process.env.BASE_URL || `https://sstamp.onrender.com`;
 let currentInterval = 30;
 
-const SECRET_KEY = Buffer.from("12345678901234567890123456789012"); // 32 chars for AES-256
+const SECRET_KEY = Buffer.from(process.env.SECRET_KEY); // 32 chars for AES-256
 // Note: keep this same in frontend for decryption
 
 app.use(cors());
