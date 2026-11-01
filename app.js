@@ -66,9 +66,9 @@ const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 15 * 1024 * 1024 }, // 15MB raw upload cap
   fileFilter: (req, file, cb) => {
-    if (!file.mimetype.startsWith("image/")) {
-      return cb(new Error("Only image files are allowed"));
-    }
+    // if (!file.mimetype.startsWith("image/")) {
+    //   return cb(new Error("Only image files are allowed"));
+    // }
 
     if (!file.mimetype.startsWith("image/")) {
       return cb(new Error(`Only image files are allowed (got: ${file.mimetype})`));
