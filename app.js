@@ -173,6 +173,18 @@ app.post("/api/interval", (req, res) => {
   }
 });
 
+// ---------------------------------------------------------------------------
+// Debug logging — prints what the client actually sends
+// ---------------------------------------------------------------------------
+app.use((req, res, next) => {
+  console.log("\n========== Incoming Request ==========");
+  console.log("Time:", new Date().toISOString());
+  console.log("Method:", req.method);
+  console.log("URL:", req.originalUrl);
+  console.log("Headers:", JSON.stringify(req.headers, null, 2));
+  next();
+});
+
 app.post("/api/upload", upload.single("screenshot"), async (req, res) => {
   try {
     if (!req.file) {
