@@ -64,23 +64,15 @@ app.use(express.json());
 
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 15 * 1024 * 1024 }, // 15MB raw upload cap
+  limits: { fileSize: 15 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
-    // if (!file.mimetype.startsWith("image/")) {
-    //   return cb(new Error("Only image files are allowed"));
-    // }
     console.log("fileFilter mimetype:", file.mimetype, "| originalname:", file.originalname);
-
-
-    if (!file.mimetype.startsWith("image/"))
-    {
-      console.error("kept this line for debugging purposes ");
-      return cb(new Error(`Only image files are allowed (got: ${file.mimetype})`));
-    }
-
+    // Don't reject based on declared mimetype — it's unreliable from this client.
+    // sharp() will throw later if the buffer isn't actually a valid image.
     cb(null, true);
   },
 });
+
 
 // ---------------------------------------------------------------------------
 // In-memory log cache (persisted to R2 as logs.json)
