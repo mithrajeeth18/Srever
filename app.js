@@ -5,14 +5,21 @@ const fs = require("fs");
 const cors = require("cors");
 const crypto = require("crypto");
 const sharp = require("sharp");
-const { S3Client, PutObjectCommand, DeleteObjectCommand } = require("@aws-sdk/client-s3");
+const {
+  S3Client,
+  PutObjectCommand,
+  DeleteObjectCommand,
+  GetObjectCommand,
+} = require("@aws-sdk/client-s3");
 require("dotenv").config();
 
 const app = express();
 const PORT = process.env.PORT || 5001;
 let currentInterval = 30;
 
-// ---- Validate required env vars on startup ----
+// ---------------------------------------------------------------------------
+// Startup validation
+// ---------------------------------------------------------------------------
 const REQUIRED_ENV = [
   "SECRET_KEY",
   "R2_ACCOUNT_ID",
@@ -33,7 +40,9 @@ if (SECRET_KEY.length !== 32) {
   process.exit(1);
 }
 
-// ---- R2 (S3-compatible) client ----
+// ---------------------------------------------------------------------------
+// R2 (S3-compatible) client
+// ---------------------------------------------------------------------------
 const s3 = new S3Client({
   region: "auto",
   endpoint: `https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
@@ -45,14 +54,17 @@ const s3 = new S3Client({
 
 const R2_BUCKET = process.env.R2_BUCKET_NAME;
 const R2_PUBLIC_URL = process.env.R2_PUBLIC_URL.replace(/\/$/, ""); // strip trailing slash
+const LOGS_KEY = "logs.json"; // persisted log index, stored as an object in the same bucket
 
+// ---------------------------------------------------------------------------
+// Middleware
+// ---------------------------------------------------------------------------
 app.use(cors());
 app.use(express.json());
 
-// ---- Multer: store in memory, not disk, since we upload to R2 ----
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 15 * 1024 * 1024 }, // 15MB raw upload cap, safety net
+  limits: { fileSize: 15 * 1024 * 1024 }, // 15MB raw upload cap
   fileFilter: (req, file, cb) => {
     if (!file.mimetype.startsWith("image/")) {
       return cb(new Error("Only image files are allowed"));
@@ -61,9 +73,55 @@ const upload = multer({
   },
 });
 
-let logs = []; // { imageUrl, usage, timestamp }
+// ---------------------------------------------------------------------------
+// In-memory log cache (persisted to R2 as logs.json)
+// ---------------------------------------------------------------------------
+let logs = []; // { imageUrl, key, usage, timestamp }
 
-// ---- Encryption ----
+function streamToString(stream) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    stream.on("data", (chunk) => chunks.push(chunk));
+    stream.on("error", reject);
+    stream.on("end", () => resolve(Buffer.concat(chunks).toString("utf-8")));
+  });
+}
+
+async function loadLogsFromR2() {
+  try {
+    const result = await s3.send(new GetObjectCommand({ Bucket: R2_BUCKET, Key: LOGS_KEY }));
+    const bodyText = await streamToString(result.Body);
+    logs = JSON.parse(bodyText);
+    console.log(`✅ Loaded ${logs.length} logs from R2`);
+  } catch (err) {
+    if (err.name === "NoSuchKey") {
+      console.log("ℹ️ No existing logs.json in R2 — starting fresh");
+      logs = [];
+    } else {
+      console.error("⚠️ Failed to load logs.json from R2:", err.message);
+      logs = [];
+    }
+  }
+}
+
+async function saveLogsToR2() {
+  try {
+    await s3.send(
+      new PutObjectCommand({
+        Bucket: R2_BUCKET,
+        Key: LOGS_KEY,
+        Body: JSON.stringify(logs),
+        ContentType: "application/json",
+      })
+    );
+  } catch (err) {
+    console.error("⚠️ Failed to save logs.json to R2:", err.message);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Encryption
+// ---------------------------------------------------------------------------
 function encryptData(data) {
   const iv = crypto.randomBytes(16);
   const cipher = crypto.createCipheriv("aes-256-cbc", SECRET_KEY, iv);
@@ -71,7 +129,9 @@ function encryptData(data) {
   return { iv: iv.toString("hex"), data: encrypted.toString("hex") };
 }
 
-// ---- Upload a buffer to R2, returns public URL ----
+// ---------------------------------------------------------------------------
+// R2 object helpers
+// ---------------------------------------------------------------------------
 async function uploadToR2(buffer, key, contentType = "image/jpeg") {
   await s3.send(
     new PutObjectCommand({
@@ -84,16 +144,17 @@ async function uploadToR2(buffer, key, contentType = "image/jpeg") {
   return `${R2_PUBLIC_URL}/${key}`;
 }
 
-// ---- Delete an object from R2 by its key ----
 async function deleteFromR2(key) {
   try {
     await s3.send(new DeleteObjectCommand({ Bucket: R2_BUCKET, Key: key }));
   } catch (err) {
     console.error(`⚠️ Failed to delete R2 object "${key}":`, err.message);
-    // not fatal — don't throw, just log
   }
 }
 
+// ---------------------------------------------------------------------------
+// Routes
+// ---------------------------------------------------------------------------
 app.post("/api/interval", (req, res) => {
   try {
     const { interval } = req.body;
@@ -130,7 +191,6 @@ app.post("/api/upload", upload.single("screenshot"), async (req, res) => {
       return res.status(400).json({ error: "Invalid usage JSON" });
     }
 
-    // Compress + resize before upload
     let compressedBuffer;
     try {
       compressedBuffer = await sharp(req.file.buffer)
@@ -154,13 +214,14 @@ app.post("/api/upload", upload.single("screenshot"), async (req, res) => {
 
     logs.unshift({ imageUrl: fileUrl, key, usage, timestamp });
 
-    // Evict oldest log beyond 100, and clean up its R2 object
     if (logs.length > 100) {
       const removed = logs.pop();
       if (removed?.key) {
         await deleteFromR2(removed.key);
       }
     }
+
+    await saveLogsToR2();
 
     res.status(200).json({ message: "Uploaded", imageUrl: fileUrl });
   } catch (err) {
@@ -179,7 +240,9 @@ app.get("/api/logs", (req, res) => {
   }
 });
 
-// ---- Multer / general error handler (must come after routes) ----
+// ---------------------------------------------------------------------------
+// Error handling
+// ---------------------------------------------------------------------------
 app.use((err, req, res, next) => {
   if (err instanceof multer.MulterError) {
     console.error("❌ Multer error:", err.message);
@@ -192,12 +255,10 @@ app.use((err, req, res, next) => {
   next();
 });
 
-// ---- 404 ----
 app.use((req, res) => {
   res.status(404).json({ error: "Not found" });
 });
 
-// ---- Process-level safety nets ----
 process.on("unhandledRejection", (reason) => {
   console.error("❌ Unhandled Rejection:", reason);
 });
@@ -205,6 +266,14 @@ process.on("uncaughtException", (err) => {
   console.error("❌ Uncaught Exception:", err);
 });
 
-app.listen(PORT, () => {
-  console.log(`✅ Server running on port ${PORT}`);
-});
+// ---------------------------------------------------------------------------
+// Startup
+// ---------------------------------------------------------------------------
+async function startServer() {
+  await loadLogsFromR2();
+  app.listen(PORT, () => {
+    console.log(`✅ Server running on port ${PORT}`);
+  });
+}
+
+startServer();
